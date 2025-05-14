@@ -1,0 +1,74 @@
+import requests
+import folium
+import datetime
+import smtplib
+from email.mime.text import MIMEText
+from config import EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECEIVER
+
+# 1. Fetch real-time earthquake data
+def fetch_earthquake_data():
+    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print("Error fetching data:", e)
+        return None
+
+# 2. Send email alert for strong earthquakes
+def send_email_alert(mag, place, time_str):
+    subject = "🌍 Earthquake Alert!"
+    body = f"⚠️ Earthquake Detected!\n\nLocation: {place}\nMagnitude: {mag}\nTime: {time_str}"
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = EMAIL_RECEIVER
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
+            print("✅ Email alert sent.")
+    except Exception as e:
+        print("❌ Failed to send email:", e)
+
+# 3. Create interactive map
+def create_quake_map(data, mag_threshold=3.0):
+    quake_map = folium.Map(location=[20, 0], zoom_start=2, tiles="Stamen Toner")
+
+    for quake in data["features"]:
+        props = quake["properties"]
+        mag = props["mag"]
+        place = props["place"]
+        time_ms = props["time"]
+        coords = quake["geometry"]["coordinates"]
+
+        if mag is None or mag < mag_threshold:
+            continue
+
+        time_str = datetime.datetime.utcfromtimestamp(time_ms / 1000).strftime('%Y-%m-%d %H:%M:%S UTC')
+
+        folium.CircleMarker(
+            location=[coords[1], coords[0]],
+            radius=mag * 2,
+            popup=f"{place}<br>Mag: {mag}<br>Time: {time_str}",
+            color='red' if mag >= 5 else 'orange',
+            fill=True,
+            fill_opacity=0.7
+        ).add_to(quake_map)
+
+        # Send alert for strong quakes
+        if mag >= 5.0:
+            send_email_alert(mag, place, time_str)
+
+    quake_map.save("earthquake_map.html")
+    print("✅ Map saved as 'earthquake_map.html'")
+
+# 4. Run the app
+if __name__ == "__main__":
+    data = fetch_earthquake_data()
+    if data:
+        create_quake_map(data)
+
+
